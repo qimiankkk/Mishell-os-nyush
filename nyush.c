@@ -6,31 +6,51 @@
 int main(){
     const int MAX_INPUT_SIZE = 1024;
     char cwd[MAX_INPUT_SIZE];
+    char *line = NULL;
+    size_t len = 0;
+    ssize_t read = 0;
 
-    // Get the current working directory
-    if(getcwd(cwd, sizeof(cwd))!= NULL){
+    while(1){
+        
+        /* M1: Print the prompt */
+        // Get the current working directory
+        if(getcwd(cwd, sizeof(cwd))!= NULL){
 
-        // Get the basename from cwd
-        char *basename;
+            // Get the basename from cwd
+            char *basename;
+            if (strcmp(cwd,"/") ==0){ // root directory
+                basename = "/";
+            }else{
+                basename = strrchr(cwd, '/'); // note: strrchr() returns a pointer to the last occurrence of '/'
+                basename++; // skip the "/"
+            }
 
-        if (strcmp(cwd,"/") ==0){ // we're in the root directory
-            basename = "/";
+            // Prompt printing 
+            printf("[nyush %s]$", basename);
+            fflush(stdout);
         }else{
-            basename = strrchr(cwd, '/'); // note: strrchr() returns a pointer to the last occurrence of '/'
-            basename++; // skip the "/"
+            perror("Error getting current working directory.");
+            exit(1);
         }
 
-        // Prompt printing 
-        printf("[nyush %s]$", basename);
+        /* M2: Read user input */
+        read = getline(&line, &len, stdin);
+        if (read == -1){  // captures EOF
+            break;
+        }
+        if(read > 0 && line[read-1]=='\n'){  // replace the '\n' char
+            line[read-1] = '\0';
+        }
 
-        fflush(stdout);
-    }else{
-        perror("Error getting current working directory.");
+        if(strlen(line)==0){
+            continue;
+        }
+
+        printf("you entered: '%s' \n", line);
+
     }
+    free(line);
 
-    printf("\n");
 
     return 0;
-
-    
 }
