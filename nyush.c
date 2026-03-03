@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
+#define MAX_ARGS 1000
+
 int main(){
     const int MAX_INPUT_SIZE = 1024;
     char cwd[MAX_INPUT_SIZE];
@@ -27,7 +29,7 @@ int main(){
             }
 
             // Prompt printing 
-            printf("[nyush %s]$", basename);
+            printf("[nyush %s]$ ", basename);
             fflush(stdout);
         }else{
             perror("Error getting current working directory.");
@@ -48,30 +50,62 @@ int main(){
 
         // printf("you entered: '%s' \n", line);
 
-        /* M3: Run simple programs */
+        /* M4: Parse multiple arguments*/
+        char *args[MAX_ARGS];
+        int arg_count = 0;
         char *savecmd;
-        // first command only
+        
         char *cmd = strtok_r(line, " ", &savecmd);
-        if (cmd == NULL) continue;
+        while(cmd != NULL && arg_count < MAX_ARGS){
+            args[arg_count++] = cmd;
+            // arg_count++;
+            cmd = strtok_r(NULL, " ", &savecmd);
+        }
+        args[arg_count] = NULL;
+
+        if (arg_count == 0) continue;
+
+        /* M5: built-in commands */
+        /* Built-in: cd */
+        if(strcmp(args[0], "cd") == 0){
+            if (arg_count != 2){
+                fprintf(stderr, "Error: invalid command\n");
+                continue;
+            }
+            if(chdir(args[1]) != 0){
+                fprintf(stderr, "Error: invalid directory\n");
+            }
+            continue;
+        }
+
+        /* Built-in: exit */
+        if(strcmp(args[0], "exit") == 0){
+            if(arg_count != 1){
+                fprintf(stderr, "Error: invalid command\n");
+                continue;
+            }
+            break; // terminate the shell
+        }
+
 
         // handles slash and searches for /usesr/bin
-        char exec_path[1024];
-        if(strchr(cmd,'/')!= NULL){
+        char exec_path[MAX_INPUT_SIZE];
+        
+        if(strchr(args[0],'/')!= NULL){
             // a path is provided
-            strncpy(exec_path, cmd, sizeof(exec_path-1));
+            strncpy(exec_path, args[0], sizeof(exec_path) - 1);
             exec_path[sizeof(exec_path) - 1] = '\0';
         }else{
-            // only a base name is provided, search for /usr/bin
-            snprintf(exec_path, sizeof(exec_path), "/usr/bin/%s", cmd);
+            // only a base name is provided=
+            snprintf(exec_path, sizeof(exec_path), "/usr/bin/%s", args[0]);
         }
-        char *args[] = {cmd, NULL}; // a NULL-terminated array of args for exec
 
         pid_t pid = fork();
-        if(pid < 0) perror("Fork failed.");
+        if (pid < 0) perror("Fork failed.");
         else if(pid == 0) {
             // child process
             execv(exec_path, args);
-            perror("Error: invalid program");
+            fprintf(stderr, "Error: invalid program\n");
             exit(1);
         } else{
             // shell process
