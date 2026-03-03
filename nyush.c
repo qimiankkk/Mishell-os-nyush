@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 int main(){
     const int MAX_INPUT_SIZE = 1024;
@@ -35,9 +36,8 @@ int main(){
 
         /* M2: Read user input */
         read = getline(&line, &len, stdin);
-        if (read == -1){  // captures EOF
-            break;
-        }
+        if (read == -1) break;  // captures EOF
+        
         if(read > 0 && line[read-1]=='\n'){  // replace the '\n' char
             line[read-1] = '\0';
         }
@@ -46,7 +46,38 @@ int main(){
             continue;
         }
 
-        printf("you entered: '%s' \n", line);
+        // printf("you entered: '%s' \n", line);
+
+        /* M3: Run simple programs */
+        char *savecmd;
+        // first command only
+        char *cmd = strtok_r(line, " ", &savecmd);
+        if (cmd == NULL) continue;
+
+        // handles slash and searches for /usesr/bin
+        char exec_path[1024];
+        if(strchr(cmd,'/')!= NULL){
+            // a path is provided
+            strncpy(exec_path, cmd, sizeof(exec_path-1));
+            exec_path[sizeof(exec_path) - 1] = '\0';
+        }else{
+            // only a base name is provided, search for /usr/bin
+            snprintf(exec_path, sizeof(exec_path), "/usr/bin/%s", cmd);
+        }
+        char *args[] = {cmd, NULL}; // a NULL-terminated array of args for exec
+
+        pid_t pid = fork();
+        if(pid < 0) perror("Fork failed.");
+        else if(pid == 0) {
+            // child process
+            execv(exec_path, args);
+            perror("Error: invalid program");
+            exit(1);
+        } else{
+            // shell process
+            int status;
+            waitpid(pid, &status, 0);
+        }
 
     }
     free(line);
