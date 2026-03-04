@@ -3,10 +3,14 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <fcntl.h>
+#include <errno.h>
+
+#include "io_redirect.h"
 
 #define MAX_ARGS 1000
 
-int main(){
+int main(void){
     const int MAX_INPUT_SIZE = 1024;
     char cwd[MAX_INPUT_SIZE];
     char *line = NULL;
@@ -40,7 +44,7 @@ int main(){
         read = getline(&line, &len, stdin);
         if (read == -1) break;  // captures EOF
         
-        if(read > 0 && line[read-1]=='\n'){  // replace the '\n' char
+        if(read > 0 && line[read-1]=='\n'){  // replace the '\n' char by '\0'
             line[read-1] = '\0';
         }
 
@@ -50,25 +54,32 @@ int main(){
 
         // printf("you entered: '%s' \n", line);
 
-        /* M4: Parse multiple arguments*/
+        /* M4: Parse multiple arguments (string tokenization)*/
         char *args[MAX_ARGS];
         int arg_count = 0;
-        char *savecmd;
+        char *saveptr; // the save pointer for saving the context of tokens
         
-        char *cmd = strtok_r(line, " ", &savecmd);
+        char *cmd = strtok_r(line, " ", &saveptr);
         while(cmd != NULL && arg_count < MAX_ARGS){
             args[arg_count++] = cmd;
             // arg_count++;
-            cmd = strtok_r(NULL, " ", &savecmd);
+            cmd = strtok_r(NULL, " ", &saveptr);
         }
         args[arg_count] = NULL;
 
         if (arg_count == 0) continue;
 
+        /* M6/M7: I/O redirection */
+        Redirection redir;
+        if (parse_redirection(args, &arg_count, &redir) != 0) {
+            continue;  // print the parse error
+        }
+
         /* M5: built-in commands */
         /* Built-in: cd */
         if(strcmp(args[0], "cd") == 0){
-            if (arg_count != 2){
+            if (arg_count != 2 ||
+                redir.input_file != NULL || redir.output_file != NULL){
                 fprintf(stderr, "Error: invalid command\n");
                 continue;
             }
@@ -80,7 +91,8 @@ int main(){
 
         /* Built-in: exit */
         if(strcmp(args[0], "exit") == 0){
-            if(arg_count != 1){
+            if(arg_count != 1 ||
+               redir.input_file != NULL || redir.output_file != NULL){
                 fprintf(stderr, "Error: invalid command\n");
                 continue;
             }
@@ -88,22 +100,32 @@ int main(){
         }
 
 
-        // handles slash and searches for /usesr/bin
+        // Locating programs
         char exec_path[MAX_INPUT_SIZE];
-        
         if(strchr(args[0],'/')!= NULL){
             // a path is provided
             strncpy(exec_path, args[0], sizeof(exec_path) - 1);
             exec_path[sizeof(exec_path) - 1] = '\0';
         }else{
             // only a base name is provided=
+
+            // strcpy(exec_path, "/usr/bin/");
+            // strcat(exec_path, args[0]);
+
+            // strlcpy(exec_path, "/usr/bin/", sizeof(exec_path));
+            // strlcat(exec_path, args[0], sizeof(exec_path));
+
             snprintf(exec_path, sizeof(exec_path), "/usr/bin/%s", args[0]);
         }
+        
 
         pid_t pid = fork();
         if (pid < 0) perror("Fork failed.");
         else if(pid == 0) {
             // child process
+            if (apply_redirection(&redir) != 0) {
+                exit(1);
+            }
             execv(exec_path, args);
             fprintf(stderr, "Error: invalid program\n");
             exit(1);
