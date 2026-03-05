@@ -20,7 +20,6 @@ static int is_valid_filename(const char *s){
     return 1;
 }
 
-
 /* 
 This function implements the following:
 1. scans through the args array sequentially, and extracts the indx of token <, >, >>.
@@ -65,24 +64,20 @@ int parse_redirection(char **args, int *arg_count, Redirection *redir){
                 fprintf(stderr, "Error: invalid command\n");
                 return -1;
             }
+            int is_append = (strcmp(args[i], ">>") == 0);
             i++; // the starting index of the output file
             if (i >= *arg_count || !is_valid_filename(args[i])) {
                 fprintf(stderr, "Error: invalid command\n");
                 return -1;
             }
             redir->output_file = args[i];
-            if (strcmp(args[i], ">") == 0){
-                redir->append = 0;
-            } else{
-                redir->append = 1;
-            }
+            redir->append = is_append;
             i++;
+        } else {
+            // a non-redirection token in the redirection section
+            fprintf(stderr, "Error: invalid command\n");
+            return -1;
         }
-        // } else {
-        //     // the token is not a redirection token, error
-        //     fprintf(stderr, "Error: invalid command\n");
-        //     return -1;
-        // }
     }
 
     // truncate args to only store command args
@@ -93,12 +88,12 @@ int parse_redirection(char **args, int *arg_count, Redirection *redir){
 }
 
 
-/* 
-This program implements the following: 
-1. try to open input redirected file, with O_RDONLY. And implements the redirection using dup2. 
-2. try to open output redirected file, with O_WRONLY|O_CREAT, as wellas 0_TRUNC for > and 0_APPEND for >>. And implements the redirection using dup2. 
+/*
+This function implements the following:
+1. try to open input redirected file, with O_RDONLY. And implements the redirection using dup2.
+2. try to open output redirected file, with O_WRONLY|O_CREAT, as well as O_TRUNC for > and O_APPEND for >>. And implements the redirection using dup2.
 3. prints "Error: invalid file" on open failure.
-4. returns -1 when fails. 
+4. returns -1 when fails.
 */
 int apply_redirection(const Redirection *redir)
 {

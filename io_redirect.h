@@ -17,12 +17,12 @@ This function implements the following:
 */
 int parse_redirection(char **args, int *arg_count, Redirection *redir);
 
-/* 
-This program implements the following: 
-1. try to open input redirected file, with O_RDONLY. And implements the redirection using dup2. 
-2. try to open output redirected file, with O_WRONLY|O_CREAT, as wellas 0_TRUNC for > and 0_APPEND for >>. And implements the redirection using dup2. 
+/*
+This function implements the following:
+1. try to open input redirected file, with O_RDONLY. And implements the redirection using dup2.
+2. try to open output redirected file, with O_WRONLY|O_CREAT, as wellas 0_TRUNC for > and 0_APPEND for >>. And implements the redirection using dup2.
 3. prints "Error: invalid file" on open failure.
-4. returns -1 when fails. 
+4. returns -1 when fails.
 */
 int apply_redirection(const Redirection *redir);
 
