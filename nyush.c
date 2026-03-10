@@ -5,18 +5,26 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <signal.h>
 
 #include "io_redirect.h"
 #include "pipeline.h"
+#include "jobs.h"
 
 #define MAX_ARGS 1000
 
+
 int main(void){
-    const int MAX_INPUT_SIZE = 1024;
+    const int MAX_INPUT_SIZE = 2000;
     char cwd[MAX_INPUT_SIZE];
     char *line = NULL;
     size_t len = 0;
     ssize_t read = 0;
+
+    // Shell ignores SIGINT, SIGQUIT, SIGTSTP
+    signal(SIGINT, SIG_IGN);
+    signal(SIGQUIT, SIG_IGN);
+    signal(SIGTSTP, SIG_IGN);
 
     while(1){
         
@@ -43,7 +51,13 @@ int main(void){
 
         /* M2: Read user input */
         read = getline(&line, &len, stdin);
-        if (read == -1) break;  // captures EOF
+        if (read == -1) {
+            if (errno == EINTR) {  // interrupted by signal, retry
+                clearerr(stdin);
+                continue;
+            }
+            break;  // captures EOF
+        }
         
         if(read > 0 && line[read-1]=='\n'){  // replace the '\n' char by '\0'
             line[read-1] = '\0';
@@ -53,7 +67,10 @@ int main(void){
             continue;
         }
 
-        // printf("you entered: '%s' \n", line);
+        // Save original command line before tokenization (for job tracking)
+        char saved_line[MAX_INPUT_SIZE];
+        strncpy(saved_line, line, sizeof(saved_line) - 1);
+        saved_line[sizeof(saved_line) - 1] = '\0';
 
         /* M4: Parse multiple arguments (string tokenization)*/
         char *args[MAX_ARGS];
@@ -68,25 +85,25 @@ int main(void){
         }
         args[arg_count] = NULL;
 
-        // if (arg_count == 0) continue;
+        if (arg_count == 0) continue;
 
         /* M6/M7: I/O redirection && M8/M9: pipes */
         Pipeline pipeline;
         if (parse_pipeline(args, arg_count, &pipeline) != 0) {  // parse the segmented commands into pipe
             // -- use data in pipe from now on --
-            continue;  // print the errors if any
+            continue;  // here prints the errors if any
         }
 
-        /* Built-in commands cannot appear after a pipe */
+        /* // Built-in commands cannot appear after a pipe
         int skip = 0; 
         for (int i = 1; i < pipeline.num_cmds; i++) {
-            if (strcmp(pipeline.cmds[i].argv[0], "cd")   == 0 || strcmp(pipeline.cmds[i].argv[0], "exit") == 0){
+            if (strcmp(pipeline.cmds[i].argv[0], "cd") == 0 || strcmp(pipeline.cmds[i].argv[0], "exit") == 0){
                 fprintf(stderr, "Error: invalid command\n");
                 skip = 1;
                 break;
             }
         }
-        // if (skip) continue;
+        // if (skip) continue; */
 
         /* M5: built-in commands (no redirection) */
         /* Built-in: cd */
@@ -110,6 +127,49 @@ int main(void){
             break; // terminate the shell
         }
 
+        /* Built-in: jobs */
+        if(strcmp(pipeline.cmds[0].argv[0], "jobs") == 0){
+            if (pipeline.num_cmds != 1 || pipeline.cmds[0].argc != 1 || pipeline.redir.input_file != NULL || pipeline.redir.output_file != NULL){
+                fprintf(stderr, "Error: invalid command\n");
+                continue;
+            }
+            print_jobs();
+            continue;
+        }
+
+        /* Built-in: fg */
+        if (strcmp(pipeline.cmds[0].argv[0], "fg") == 0) {
+            if (pipeline.num_cmds != 1 || pipeline.cmds[0].argc != 2 || pipeline.redir.input_file != NULL || pipeline.redir.output_file != NULL) {
+                fprintf(stderr, "Error: invalid command\n");
+                continue;
+            }
+            int idx = atoi(pipeline.cmds[0].argv[1]);
+            if (idx < 1 || idx > job_count) {
+                fprintf(stderr, "Error: invalid job\n");
+                continue;
+            }
+            // Retrieve the job (1-indexed to 0-indexed)
+            pid_t pid = job_list[idx - 1].pid;
+            char fg_cmd[MAX_CMD_LEN];
+            strncpy(fg_cmd, job_list[idx - 1].command, MAX_CMD_LEN - 1);
+            fg_cmd[MAX_CMD_LEN - 1] = '\0';
+
+            // Remove from job list
+            remove_job(idx - 1);
+
+            // Resume the process
+            kill(pid, SIGCONT);
+
+            // Wait for it (may stop again or terminate)
+            int status;
+            waitpid(pid, &status, WUNTRACED);
+            if (WIFSTOPPED(status)) {
+                add_job(pid, fg_cmd);
+            }
+            continue;
+        }
+
+
         /* Execute pipeline */
         int num_pipes = pipeline.num_cmds - 1;
         int pipefds[num_pipes][2];  // the array of file descriptors that will be updated by pipe() syscall
@@ -119,11 +179,11 @@ int main(void){
         for (int i = 0; i < num_pipes; i++) {
             if (pipe(pipefds[i]) < 0) {  // pipe() syscall updates pipefds[]
                 perror("Pipe failed");
-                skip = 1;
+                // skip = 1;
                 break;
             }
         }
-        if (skip) continue;
+        // if (skip) continue;
 
         // Fork a child for each command in the pipeline
         for (int i = 0; i < pipeline.num_cmds; i++) {
@@ -133,6 +193,11 @@ int main(void){
                 break;
             }
             if (pids[i] == 0) {
+                // Child: restore default signal handlers
+                signal(SIGINT, SIG_DFL);
+                signal(SIGQUIT, SIG_DFL);
+                signal(SIGTSTP, SIG_DFL);
+
                 // Child: connect pipes
                 if (i >= 1){
                     dup2(pipefds[i - 1][0], STDIN_FILENO);  // connecting the read end
@@ -185,7 +250,10 @@ int main(void){
         // Wait for all children
         for (int i = 0; i < pipeline.num_cmds; i++) {
             int status;
-            waitpid(pids[i], &status, 0);
+            waitpid(pids[i], &status, WUNTRACED);
+            if (WIFSTOPPED(status)) {
+                add_job(pids[i], saved_line);
+            }
         }
 
     }
